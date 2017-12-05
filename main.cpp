@@ -249,7 +249,7 @@ void prepareTableImport(Import *import){
 	moduleImports->tables.push_back(ezTableVal{import->field_name,table_import->table.elem_limits.initial,table_import->table.elem_limits.max});
 }
 
-std::string demangle(std::string name){
+std::string demangle(std::string name, bool replace = true){
 	int     status;
 	char *realnamec = abi::__cxa_demangle(name.c_str(), 0, 0, &status);
 	auto strRealName = name;
@@ -257,10 +257,13 @@ std::string demangle(std::string name){
 		strRealName = std::string(realnamec);
 	}
 
-	std::replace( strRealName.begin(), strRealName.end(), ' ', '_');
-	std::replace( strRealName.begin(), strRealName.end(), '*', '_');
-	std::replace( strRealName.begin(), strRealName.end(), '(', '_');
-	std::replace( strRealName.begin(), strRealName.end(), ')', '_');
+	if(replace){
+		std::replace( strRealName.begin(), strRealName.end(), ' ', '_');
+		std::replace( strRealName.begin(), strRealName.end(), '*', '_');
+		std::replace( strRealName.begin(), strRealName.end(), '(', '_');
+		std::replace( strRealName.begin(), strRealName.end(), ')', '_');
+	}
+
 
 	return strRealName;
 }
@@ -362,7 +365,7 @@ int main(){
 						auto func = module->GetFunc(tableVar);
 						jsCode << "// [" << elemsCounter << "] => " << tableVar.name() << " : " << printFuncSignature(func);
 						auto fName = tableVar.name().substr(1); //removing $
-						auto demangled = demangle(fName);
+						auto demangled = demangle(fName,false);
 						if(fName != demangled){
 							jsCode << " (demangled " << demangled << ")";
 						}
