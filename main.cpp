@@ -30,7 +30,7 @@
 
 using namespace wabt;
 
-static const char* s_infile = "table.wast";
+static const char* s_infile = "wast/cpp.wast";
 static std::string s_outfile;
 static bool s_dump_module;
 static int s_verbose;
@@ -42,71 +42,38 @@ static Features s_features;
 static std::unique_ptr<FileStream> s_log_stream;
 
 struct ezFuncVal {
-	ezFuncVal() {}
-	ezFuncVal(std::string newName, std::string newRealName,std::vector<Type> newSignature): name(newName), realName(newRealName), signature(newSignature) {}
 	std::string name;
 	std::string realName;
 	std::vector<Type> signature;
+	std::vector<Type> returnValues;
 };
 
 struct ezTableVal {
-	ezTableVal() {}
-	ezTableVal(std::string newName, std::string newValue): name(newName), value(newValue) {}
 	std::string name;
-	std::string value;
 	uint64_t initial = 0;
     uint64_t max = 0;
 };
 
+struct ezMemoryVal {
+	std::string name;
+	uint64_t initial = 0;
+    uint64_t max = 0;
+};
 
-struct ezImport
+struct ezImports
 {
-  enum importType {
-    None,
-	Function,
-	Table
-  };
-
-  importType currentType;
-
-  ezImport(std::string newName, std::string newRealName,std::vector<Type> newSignature) : function(newName,newRealName,newSignature),currentType(importType::Function) {}
-
-  ezImport(std::string newName, std::string newValue) : table(newName,newValue), currentType(importType::Table) {
-	  currentType = importType::Table;
-  }
-
-  union {
-    ezTableVal table;
-    ezFuncVal function;
-  };
-
-  ~ezImport(){
-	  switch(currentType){
-		  case importType::Function : {
-			  function.~ezFuncVal();
-			  break;
-		  }
-		  case importType::Table : {
-			  table.~ezTableVal();
-			  break;
-		  }
-	  }
-  };
-
-  ezImport(ezImport &&import){
-
-  }
-
-  importType getType() const{
-	  return currentType;
-  }
+  std::string moduleName;
+  std::vector<ezFuncVal> functions;
+  std::vector<ezTableVal> tables;
+  std::vector<ezMemoryVal> memory;
 };
 
-struct innerMap {
-	std::map<std::string,ezImport> map;
+
+struct jsModule {
+	std::vector<ezImports> imports;
 };
 
-std::map<std::string, innerMap> jsModule;
+jsModule parsedModule;
 
 std::string printParams(std::vector<Type> signature){
 	int param_counter = 1;
@@ -139,9 +106,195 @@ std::string printParams(std::vector<Type> signature){
 	return ret;
 }
 
+std::string printReturnParams(std::vector<Type> returnValues){
+	int param_counter = 1;
+	std::stringstream ss;
+	std::string varName;
+	std::string varVal;
+	for(auto& type : returnValues){
+		switch(type) {
+			case Type::I32 : {
+				varName = "r_i32_"+std::to_string(param_counter);
+				varVal = "0";
+				break;
+			}
+			case Type::I64 : {
+				varName = "r_i64_"+std::to_string(param_counter);
+				varVal = "0";
+				break;
+			}
+			case Type::F32 : {
+				varName = "r_f32_"+std::to_string(param_counter);
+				varVal = "0.0";
+				break;
+			}
+			case Type::F64 : {
+				varName = "r_f32_"+std::to_string(param_counter);
+				varVal = "0.0";
+				break;
+			}
+		}
+	}
+
+	if(!varName.empty()){
+		ss << "\tvar " << varName << " = " << varVal << ";\n";
+		ss << "\treturn " << varName << ";\n";
+	}
+
+
+	return ss.str();
+}
+
+std::string printFuncSignature(Func *func){
+	std::stringstream ss;
+	std::string paramsSignature = "";
+	ss << "(";
+	for(auto& type : func->decl.sig.param_types){
+		switch(type) {
+			case Type::I32 : {
+				paramsSignature += "i32, ";
+				break;
+			}
+			case Type::I64 : {
+				paramsSignature += "i64, ";
+				break;
+			}
+			case Type::F32 : {
+				paramsSignature += "f32, ";
+				break;
+			}
+			case Type::F64 : {
+				paramsSignature += "f64, ";
+				break;
+			}
+		}
+	}
+	if(!paramsSignature.empty()){
+		paramsSignature.pop_back();
+		paramsSignature.pop_back();
+	}
+
+	ss << paramsSignature << ") => ";
+
+	paramsSignature = "";
+	for(auto& type : func->decl.sig.result_types){
+		switch(type) {
+			case Type::I32 : {
+				paramsSignature += "i32, ";
+				break;
+			}
+			case Type::I64 : {
+				paramsSignature += "i64, ";
+				break;
+			}
+			case Type::F32 : {
+				paramsSignature += "f32, ";
+				break;
+			}
+			case Type::F64 : {
+				paramsSignature += "f64, ";
+				break;
+			}
+		}
+	}
+	if(!paramsSignature.empty()){
+		paramsSignature.pop_back();
+		paramsSignature.pop_back();
+	}
+
+	ss << "(" << paramsSignature << ")";
+
+	return ss.str();
+}
+
+void prepareMemoryImport(Import *import){
+	auto memory_import =  dyn_cast<MemoryImport>(import);
+	auto iter = std::find_if(std::begin(parsedModule.imports), std::end(parsedModule.imports),
+			    [&] (ezImports const& ezI)
+			{
+				return ezI.moduleName == import->module_name;
+			});
+
+	decltype(parsedModule.imports.begin()) moduleImports;
+
+	if(iter == parsedModule.imports.end()){
+		parsedModule.imports.emplace_back(ezImports{import->module_name});
+		moduleImports = parsedModule.imports.end() - 1;
+	}
+	else{
+		moduleImports = iter;
+	}
+
+	moduleImports->memory.push_back(ezMemoryVal{import->field_name,memory_import->memory.page_limits.initial,memory_import->memory.page_limits.max});
+}
+
+void prepareTableImport(Import *import){
+	auto table_import =  dyn_cast<TableImport>(import);
+	auto iter = std::find_if(std::begin(parsedModule.imports), std::end(parsedModule.imports),
+			    [&] (ezImports const& ezI)
+			{
+				return ezI.moduleName == import->module_name;
+			});
+
+	decltype(parsedModule.imports.begin()) moduleImports;
+
+	if(iter == parsedModule.imports.end()){
+		parsedModule.imports.emplace_back(ezImports{import->module_name});
+		moduleImports = parsedModule.imports.end() - 1;
+	}
+	else{
+		moduleImports = iter;
+	}
+
+	moduleImports->tables.push_back(ezTableVal{import->field_name,table_import->table.elem_limits.initial,table_import->table.elem_limits.max});
+}
+
+std::string demangle(std::string name){
+	int     status;
+	char *realnamec = abi::__cxa_demangle(name.c_str(), 0, 0, &status);
+	auto strRealName = name;
+	if(realnamec != nullptr){
+		strRealName = std::string(realnamec);
+	}
+
+	std::replace( strRealName.begin(), strRealName.end(), ' ', '_');
+	std::replace( strRealName.begin(), strRealName.end(), '*', '_');
+	std::replace( strRealName.begin(), strRealName.end(), '(', '_');
+	std::replace( strRealName.begin(), strRealName.end(), ')', '_');
+
+	return strRealName;
+}
+
+void prepareFunctionImport(Import *import){
+	int     status;
+	char *realnamec = abi::__cxa_demangle(import->field_name.c_str(), 0, 0, &status);
+	auto func_import =  dyn_cast<FuncImport>(import);
+	auto param_types = func_import->func.decl.sig.param_types;
+	int param_counter = 1;
+	auto strRealName = demangle(import->field_name);
+
+	auto iter = std::find_if(std::begin(parsedModule.imports), std::end(parsedModule.imports),
+		    [&] (ezImports const& ezI)
+			{
+				return ezI.moduleName == import->module_name;
+			});
+
+	decltype(parsedModule.imports.begin()) moduleImports;
+
+	if(iter == parsedModule.imports.end()){
+		parsedModule.imports.emplace_back(ezImports{import->module_name});
+		moduleImports = parsedModule.imports.end() - 1;
+	}
+	else{
+		moduleImports = iter;
+	}
+
+	moduleImports->functions.push_back(ezFuncVal{import->field_name,strRealName,func_import->func.decl.sig.param_types,func_import->func.decl.sig.result_types});
+}
+
+
 
 int main(){
-	std::cout << "Hello world" << "\r\n";
 	std::unique_ptr<WastLexer> lexer = WastLexer::CreateFileLexer(s_infile);
 	if (!lexer)
 	    WABT_FATAL("unable to read file: %s\n", s_infile);
@@ -152,37 +305,20 @@ int main(){
 	Result result =
 		  ParseWatModule(lexer.get(), &module, &error_handler, &parse_wast_options);
 	std::cout << "Imports count " << module->imports.size() << "\r\n";
+	std::vector<std::string> tableElems;
+
 	for(auto& import : module->imports){
-		int     status;
 		switch(import->kind()){
 			case ExternalKind::Func :{
-				char *realnamec = abi::__cxa_demangle(import->field_name.c_str(), 0, 0, &status);
-				auto func_import =  dyn_cast<FuncImport>(import);
-				auto param_types = func_import->func.decl.sig.param_types;
-				int param_counter = 1;
-				auto strRealName = import->field_name;
-				if(realnamec != nullptr){
-					strRealName = std::string(realnamec);
-				}
-
-				std::replace( strRealName.begin(), strRealName.end(), ' ', '_');
-				std::replace( strRealName.begin(), strRealName.end(), '*', '_');
-				std::replace( strRealName.begin(), strRealName.end(), '(', '_');
-				std::replace( strRealName.begin(), strRealName.end(), ')', '_');
-
-				auto iter = jsModule.find(func_import->func.name);
-				if(iter == jsModule.end()){
-					iter = jsModule.emplace(func_import->module_name,innerMap{}).first;
-				}
-
-				iter->second.map.emplace(func_import->func.name,import->field_name,strRealName,func_import->func.decl.sig.param_types);
-
+				prepareFunctionImport(import);
 				break;
 			}
 			case ExternalKind::Table : {
-				printf("Table! %s %s\n",import->field_name.data(),import->module_name.data());
-				auto table_import =  dyn_cast<TableImport>(import);
-				printf("Table! %lu %lu %s\n",table_import->table.elem_limits.initial,table_import->table.elem_limits.max,table_import->table.name.data());
+				prepareTableImport(import);
+				break;
+			}
+			case ExternalKind::Memory : {
+				prepareMemoryImport(import);
 				break;
 			}
 		}
@@ -190,20 +326,20 @@ int main(){
 
 	std::stringstream jsCode;
 	jsCode << "var imports = {\n";
-	for(auto const &iter : jsModule) {
-	  jsCode << "\t" << iter.first << " : {\n";
-	  auto vecSize = iter.second.map.size();
+	for(auto const &import : parsedModule.imports) {
+	  jsCode << "\t" << import.moduleName << " : {\n";
+	  auto vecSize = import.functions.size()+import.tables.size()+import.memory.size();
 	  auto argCounter = 0;
-	  for(auto const &function : iter.second.map) {
+	  for(auto const &function : import.functions) {
 		  const auto &temp = jsCode.str();
 		  jsCode.seekp(0);
 
-		  if(function.second.getType() == ezImport::importType::Function){
-			  jsCode << "function " << function.second.function.realName << "("+printParams(function.second.function.signature)+") {\n\n}\n\n";
-			  jsCode << temp;
+		  jsCode << "function " << function.realName << "("+printParams(function.signature)+") {\n";
+		  jsCode << printReturnParams(function.returnValues);
+		  jsCode << "\n}\n\n";
+		  jsCode << temp;
 
-			  jsCode << "\t\t" << function.second.function.name << " : " << function.second.function.realName;
-		  }
+		  jsCode << "\t\t" << function.name << " : " << function.realName;
 
 		  if(argCounter+1 != vecSize){
 			  jsCode << ",\n";
@@ -212,6 +348,88 @@ int main(){
 			  jsCode << "\n";
 		  }
 		  argCounter++;
+	  }
+
+	  for(auto const &table : import.tables) {
+	  		  const auto &temp = jsCode.str();
+	  		  jsCode.seekp(0);
+
+	  		  int elemsCounter = 0;
+	  		  if(!module->elem_segments.empty()){
+	  			jsCode << "// Table elements:\n";
+	  			for(auto& segment : module->elem_segments){
+					  for(auto& tableVar : segment->vars){
+						auto func = module->GetFunc(tableVar);
+						jsCode << "// [" << elemsCounter << "] => " << tableVar.name() << " : " << printFuncSignature(func);
+						auto fName = tableVar.name().substr(1); //removing $
+						auto demangled = demangle(fName);
+						if(fName != demangled){
+							jsCode << " (demangled " << demangled << ")";
+						}
+
+						jsCode << "\n";
+						elemsCounter++;
+					  }
+				  }
+	  		  }
+
+
+	  		  jsCode << "var " << table.name << " = new WebAssembly.Table({";
+	  		  if(table.initial > 0){
+	  			jsCode << "initial: " << table.initial << ", ";
+	  		  }
+
+	  		  if(table.max > 0){
+	  			  jsCode << "max: " << table.max << ", ";
+	  		  }
+
+	  		  jsCode << "element:\"anyfunc\"});\n\n";
+
+	  		  jsCode << temp;
+
+	  		  jsCode << "\t\t" << table.name << " : " << table.name;
+
+	  		  if(argCounter+1 != vecSize){
+	  			  jsCode << ",\n";
+	  		  }
+	  		  else{
+	  			  jsCode << "\n";
+	  		  }
+	  		  argCounter++;
+	  }
+
+	  for(auto const &memory : import.memory) {
+			  const auto &temp = jsCode.str();
+			  jsCode.seekp(0);
+
+			  jsCode << "var " << memory.name << " = new WebAssembly.Memory({";
+			  std::string memoryInner = "";
+			  if(memory.initial > 0){
+				  memoryInner+= "initial: " + std::to_string(memory.initial) + ", ";
+			  }
+
+			  if(memory.max > 0){
+				  memoryInner+= "max: " + std::to_string(memory.initial) + ", ";
+			  }
+
+			  if(!memoryInner.empty()){
+				  memoryInner.pop_back();
+				  memoryInner.pop_back();
+			  }
+
+			  jsCode << "});\n\n";
+
+			  jsCode << temp;
+
+			  jsCode << "\t\t" << memory.name << " : " << memory.name;
+
+			  if(argCounter+1 != vecSize){
+				  jsCode << ",\n";
+			  }
+			  else{
+				  jsCode << "\n";
+			  }
+			  argCounter++;
 	  }
 	  jsCode << "\t}\n";
 	}
