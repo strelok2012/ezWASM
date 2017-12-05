@@ -3,7 +3,7 @@ This tool generates JS-boilerplate for WASM modules.
 
 Example js code for [this wast file](https://github.com/strelok2012/ezWASM/blob/master/wast/cpp.wast):
 
-```
+```javascript
 var mem = new WebAssembly.Memory({});
 
 // Table elements:
