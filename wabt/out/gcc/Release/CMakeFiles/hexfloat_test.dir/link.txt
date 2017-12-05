@@ -1,0 +1,1 @@
+/usr/bin/g++   -O3 -DNDEBUG   CMakeFiles/hexfloat_test.dir/src/literal.cc.o CMakeFiles/hexfloat_test.dir/test/hexfloat.cc.o CMakeFiles/hexfloat_test.dir/third_party/gtest/googletest/src/gtest_main.cc.o  -o hexfloat_test -rdynamic liblibgtest.a -lpthread 
