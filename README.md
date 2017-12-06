@@ -1,5 +1,5 @@
 # ezWASM
-This tool generates JS-boilerplate for WASM modules.
+This tool generates JS-boilerplate for WASM modules (includes function signatures and demangled function names).
 
 Example js code for [this wast file](https://github.com/strelok2012/ezWASM/blob/master/wast/cpp.wast):
 
