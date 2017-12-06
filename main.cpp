@@ -60,7 +60,7 @@ struct ezMemoryVal {
     uint64_t max = 0;
 };
 
-struct ezImports
+struct ezElements
 {
   std::string moduleName;
   std::vector<ezFuncVal> functions;
@@ -70,7 +70,8 @@ struct ezImports
 
 
 struct jsModule {
-	std::vector<ezImports> imports;
+	std::vector<ezElements> imports;
+	ezElements exports;
 };
 
 jsModule parsedModule;
@@ -98,10 +99,14 @@ std::string printParams(std::vector<Type> signature){
 			}
 		}
 	}
-
 	auto ret = ss.str();
-	ret.pop_back();
-	ret.pop_back();
+
+	if(signature.size() > 0){
+		ret.pop_back();
+		ret.pop_back();
+	}
+
+
 
 	return ret;
 }
@@ -141,6 +146,68 @@ std::string printReturnParams(std::vector<Type> returnValues){
 		ss << "\treturn " << varName << ";\n";
 	}
 
+
+	return ss.str();
+}
+
+std::string printFuncSignature(ezFuncVal func){
+	std::stringstream ss;
+	std::string paramsSignature = "";
+	ss << "(";
+	for(auto& type : func.signature){
+		switch(type) {
+			case Type::I32 : {
+				paramsSignature += "i32, ";
+				break;
+			}
+			case Type::I64 : {
+				paramsSignature += "i64, ";
+				break;
+			}
+			case Type::F32 : {
+				paramsSignature += "f32, ";
+				break;
+			}
+			case Type::F64 : {
+				paramsSignature += "f64, ";
+				break;
+			}
+		}
+	}
+	if(!paramsSignature.empty()){
+		paramsSignature.pop_back();
+		paramsSignature.pop_back();
+	}
+
+	ss << paramsSignature << ") => ";
+
+	paramsSignature = "";
+	for(auto& type : func.returnValues){
+		switch(type) {
+			case Type::I32 : {
+				paramsSignature += "i32, ";
+				break;
+			}
+			case Type::I64 : {
+				paramsSignature += "i64, ";
+				break;
+			}
+			case Type::F32 : {
+				paramsSignature += "f32, ";
+				break;
+			}
+			case Type::F64 : {
+				paramsSignature += "f64, ";
+				break;
+			}
+		}
+	}
+	if(!paramsSignature.empty()){
+		paramsSignature.pop_back();
+		paramsSignature.pop_back();
+	}
+
+	ss << "(" << paramsSignature << ")";
 
 	return ss.str();
 }
@@ -210,7 +277,7 @@ std::string printFuncSignature(Func *func){
 void prepareMemoryImport(Import *import){
 	auto memory_import =  dyn_cast<MemoryImport>(import);
 	auto iter = std::find_if(std::begin(parsedModule.imports), std::end(parsedModule.imports),
-			    [&] (ezImports const& ezI)
+			    [&] (ezElements const& ezI)
 			{
 				return ezI.moduleName == import->module_name;
 			});
@@ -218,7 +285,7 @@ void prepareMemoryImport(Import *import){
 	decltype(parsedModule.imports.begin()) moduleImports;
 
 	if(iter == parsedModule.imports.end()){
-		parsedModule.imports.emplace_back(ezImports{import->module_name});
+		parsedModule.imports.emplace_back(ezElements{import->module_name});
 		moduleImports = parsedModule.imports.end() - 1;
 	}
 	else{
@@ -231,7 +298,7 @@ void prepareMemoryImport(Import *import){
 void prepareTableImport(Import *import){
 	auto table_import =  dyn_cast<TableImport>(import);
 	auto iter = std::find_if(std::begin(parsedModule.imports), std::end(parsedModule.imports),
-			    [&] (ezImports const& ezI)
+			    [&] (ezElements const& ezI)
 			{
 				return ezI.moduleName == import->module_name;
 			});
@@ -239,7 +306,7 @@ void prepareTableImport(Import *import){
 	decltype(parsedModule.imports.begin()) moduleImports;
 
 	if(iter == parsedModule.imports.end()){
-		parsedModule.imports.emplace_back(ezImports{import->module_name});
+		parsedModule.imports.emplace_back(ezElements{import->module_name});
 		moduleImports = parsedModule.imports.end() - 1;
 	}
 	else{
@@ -258,6 +325,10 @@ std::string demangle(std::string name, bool replace = true){
 	}
 
 	if(replace){
+		auto bracketIdx = strRealName.find("(");
+		if (bracketIdx!=std::string::npos){
+			strRealName.erase(bracketIdx, strRealName.size()-bracketIdx);
+		}
 		std::replace( strRealName.begin(), strRealName.end(), ' ', '_');
 		std::replace( strRealName.begin(), strRealName.end(), '*', '_');
 		std::replace( strRealName.begin(), strRealName.end(), '(', '_');
@@ -272,12 +343,10 @@ void prepareFunctionImport(Import *import){
 	int     status;
 	char *realnamec = abi::__cxa_demangle(import->field_name.c_str(), 0, 0, &status);
 	auto func_import =  dyn_cast<FuncImport>(import);
-	auto param_types = func_import->func.decl.sig.param_types;
-	int param_counter = 1;
 	auto strRealName = demangle(import->field_name);
 
 	auto iter = std::find_if(std::begin(parsedModule.imports), std::end(parsedModule.imports),
-		    [&] (ezImports const& ezI)
+		    [&] (ezElements const& ezI)
 			{
 				return ezI.moduleName == import->module_name;
 			});
@@ -285,7 +354,7 @@ void prepareFunctionImport(Import *import){
 	decltype(parsedModule.imports.begin()) moduleImports;
 
 	if(iter == parsedModule.imports.end()){
-		parsedModule.imports.emplace_back(ezImports{import->module_name});
+		parsedModule.imports.emplace_back(ezElements{import->module_name});
 		moduleImports = parsedModule.imports.end() - 1;
 	}
 	else{
@@ -293,6 +362,16 @@ void prepareFunctionImport(Import *import){
 	}
 
 	moduleImports->functions.push_back(ezFuncVal{import->field_name,strRealName,func_import->func.decl.sig.param_types,func_import->func.decl.sig.result_types});
+}
+
+void prepareFunctionExport(Export *mExport, Module *module){
+	int     status;
+	char *realnamec = abi::__cxa_demangle(mExport->name.c_str(), 0, 0, &status);
+	auto func = module->GetFunc(mExport->var);
+	auto strRealName = demangle(mExport->name);
+
+	parsedModule.exports.functions.push_back(ezFuncVal{mExport->name,strRealName,func->decl.sig.param_types,func->decl.sig.result_types});
+
 }
 
 
@@ -327,8 +406,17 @@ int main(){
 		}
 	}
 
+	for(auto& mExport : module->exports){
+		switch(mExport->kind){
+			case ExternalKind::Func :{
+				prepareFunctionExport(mExport,module.get());
+				break;
+			}
+		}
+	}
+
 	std::stringstream jsCode;
-	jsCode << "var imports = {\n";
+	jsCode << "Module.imports = {\n";
 	for(auto const &import : parsedModule.imports) {
 	  jsCode << "\t" << import.moduleName << " : {\n";
 	  auto vecSize = import.functions.size()+import.tables.size()+import.memory.size();
@@ -337,12 +425,13 @@ int main(){
 		  const auto &temp = jsCode.str();
 		  jsCode.seekp(0);
 
-		  jsCode << "function " << function.realName << "("+printParams(function.signature)+") {\n";
+		  jsCode << "// " << function.realName << " : " << printFuncSignature(function) << "\n";
+		  jsCode << "Module." << function.realName << " = function " << "("+printParams(function.signature)+") {\n";
 		  jsCode << printReturnParams(function.returnValues);
 		  jsCode << "\n}\n\n";
 		  jsCode << temp;
 
-		  jsCode << "\t\t" << function.name << " : " << function.realName;
+		  jsCode << "\t\t" << "" << function.name << " : " << "Module." <<function.realName;
 
 		  if(argCounter+1 != vecSize){
 			  jsCode << ",\n";
@@ -358,26 +447,8 @@ int main(){
 	  		  jsCode.seekp(0);
 
 	  		  int elemsCounter = 0;
-	  		  if(!module->elem_segments.empty()){
-	  			jsCode << "// Table elements:\n";
-	  			for(auto& segment : module->elem_segments){
-					  for(auto& tableVar : segment->vars){
-						auto func = module->GetFunc(tableVar);
-						jsCode << "// [" << elemsCounter << "] => " << tableVar.name() << " : " << printFuncSignature(func);
-						auto fName = tableVar.name().substr(1); //removing $
-						auto demangled = demangle(fName,false);
-						if(fName != demangled){
-							jsCode << " (demangled " << demangled << ")";
-						}
 
-						jsCode << "\n";
-						elemsCounter++;
-					  }
-				  }
-	  		  }
-
-
-	  		  jsCode << "var " << table.name << " = new WebAssembly.Table({";
+	  		  jsCode << "Module." << table.name << " = new WebAssembly.Table({";
 	  		  if(table.initial > 0){
 	  			jsCode << "initial: " << table.initial << ", ";
 	  		  }
@@ -387,6 +458,34 @@ int main(){
 	  		  }
 
 	  		  jsCode << "element:\"anyfunc\"});\n\n";
+
+	  		elemsCounter = 0;
+	  		if(!module->elem_segments.empty()){
+				jsCode << "Module.tableMapping = {\n";
+				for(auto& segment : module->elem_segments){
+					  for(auto& tableVar : segment->vars){
+						auto func = module->GetFunc(tableVar);
+						auto funcParamsStr = printParams(func->decl.sig.param_types);
+						jsCode << "\t// [" << elemsCounter << "] => " << tableVar.name() << " : " << printFuncSignature(func);
+						auto fName = tableVar.name().substr(1); //removing $
+						auto demangled = demangle(fName,false);
+						if(fName != demangled){
+							jsCode << " (demangled " << demangled << ")";
+						}
+						jsCode << "\n";
+						jsCode << "\t" << tableVar.name() << " : " << "function(" << funcParamsStr << ") {\n";
+						jsCode << "\t\t" << "return Module." << table.name << ".get(" << elemsCounter << ")(" << funcParamsStr << ");\n";
+						jsCode << "\t}";
+						if (elemsCounter+1 < module->elem_segments.size()){
+							jsCode << ",";
+						}
+						jsCode << "\n";
+						elemsCounter++;
+					  }
+				  }
+			  }
+
+	  		  jsCode << "}\n\n";
 
 	  		  jsCode << temp;
 
@@ -405,7 +504,7 @@ int main(){
 			  const auto &temp = jsCode.str();
 			  jsCode.seekp(0);
 
-			  jsCode << "var " << memory.name << " = new WebAssembly.Memory({";
+			  jsCode << "Module." << memory.name << " = new WebAssembly.Memory({";
 			  std::string memoryInner = "";
 			  if(memory.initial > 0){
 				  memoryInner+= "initial: " + std::to_string(memory.initial) + ", ";
@@ -436,7 +535,43 @@ int main(){
 	  }
 	  jsCode << "\t}\n";
 	}
+	jsCode << "}\n\n";
+
+	jsCode << "Module.exports = {\n";
+	auto vecSize =  parsedModule.exports.functions.size();
+	auto argCounter = 0;
+	for(auto const &exportFunc : parsedModule.exports.functions){
+		auto funcParams = printParams(exportFunc.signature);
+		jsCode << "\t// " << exportFunc.name << " : " << printFuncSignature(exportFunc) << "\n";
+		jsCode << "\t" << exportFunc.realName << " : function" << "("+funcParams+") {\n";
+		jsCode << "\t\treturn " << "Module.waInstance.exports." << exportFunc.name <<  "("+funcParams+");\n";
+		jsCode << "\t}";
+		if(argCounter+1 != vecSize){
+		  jsCode << ",\n";
+	    }
+	    else {
+		  jsCode << "\n";
+	    }
+		argCounter++;
+	}
+	jsCode << "}\n\n";
+
+
+	const auto &temp = jsCode.str();
+	jsCode.seekp(0);
+	jsCode << "var Module = {};\n\n";
+	jsCode << temp;
+
+	jsCode << "Module.instantiate = function(modulePath){\n";
+	jsCode << "\tfetch(modulePath).then(response =>\n";
+	jsCode << "\t\tresponse.arrayBuffer()\n";
+	jsCode << "\t).then(bytes =>\n";
+	jsCode << "\t\tWebAssembly.compile(bytes)\n";
+	jsCode << "\t).then(function(mod) {\n";
+	jsCode << "\t\tModule.waInstance = new WebAssembly.Instance(mod,Module.imports);\n";
+	jsCode << "\t})\n";
 	jsCode << "}";
+
 
 	std::ofstream outFile("test.js");
 	outFile << jsCode.rdbuf();
