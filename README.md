@@ -73,8 +73,8 @@ Module.imports = {
 		import_function : Module.import_function
 	}
 	js : {
-		tbl : tbl,
-		mem : mem
+		tbl : Module.tbl,
+		mem : Module.mem
 	}
 }
 
