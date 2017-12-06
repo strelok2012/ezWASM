@@ -489,7 +489,7 @@ int main(){
 
 	  		  jsCode << temp;
 
-	  		  jsCode << "\t\t" << table.name << " : " << table.name;
+	  		  jsCode << "\t\t" << table.name << " : Module." << table.name;
 
 	  		  if(argCounter+1 != vecSize){
 	  			  jsCode << ",\n";
@@ -523,7 +523,7 @@ int main(){
 
 			  jsCode << temp;
 
-			  jsCode << "\t\t" << memory.name << " : " << memory.name;
+			  jsCode << "\t\t" << memory.name << " : Module." << memory.name;
 
 			  if(argCounter+1 != vecSize){
 				  jsCode << ",\n";
